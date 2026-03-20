@@ -40,13 +40,6 @@ class TabGenerator:
     def find_all_positions_for_note(self, midi_note, max_fret=12):
         """
         Find ALL possible positions for a MIDI note (limited to practical frets)
-        
-        Args:
-            midi_note: MIDI note number
-            max_fret: Maximum fret to consider (default 12 for open chords)
-            
-        Returns:
-            list: All possible positions
         """
         positions = []
         
@@ -66,13 +59,6 @@ class TabGenerator:
     def score_chord_shape(self, chord_positions, chord_midi_notes):
         """
         Score a complete chord shape based on playability
-        
-        Args:
-            chord_positions: List of positions (one per note)
-            chord_midi_notes: List of MIDI notes (MUST be sorted from low to high)
-            
-        Returns:
-            float: Score (higher = better)
         """
         if not chord_positions:
             return -1000
@@ -92,36 +78,27 @@ class TabGenerator:
         sorted_midi = sorted(chord_midi_notes)
         
         # Les strings correspondantes doivent être en ordre DÉCROISSANT
-        # Exemple: [C3, E3, G3, C4, E4] → strings [5, 4, 3, 2, 1]
-        prev_string = 7  # Commence à 7 (plus que le max qui est 6)
+        prev_string = 7
         for midi in sorted_midi:
             current_string = midi_to_string[midi]
             
-            # La corde doit être STRICTEMENT plus petite (plus aiguë) que la précédente
             if current_string >= prev_string:
-                # Ordre incorrect ! Note plus aiguë sur corde plus grave
                 return -100000
             
             prev_string = current_string
         
-        # BONUS: Respecte l'ordre logique
         score += 100
         
         # Vérifier ranges logiques par note
         for i, (pos, midi) in enumerate(zip(chord_positions, chord_midi_notes)):
-            # Notes très graves (< E3 = MIDI 52) devraient être sur cordes 4-6
             if midi < 52:
                 if pos['string'] >= 4:
-                    score += 50  # Bonus
+                    score += 50
                 else:
-                    score -= 500  # Pénalité
-            
-            # Notes moyennes (E3 à C4) sur cordes 2-4
+                    score -= 500
             elif 52 <= midi <= 60:
                 if 2 <= pos['string'] <= 4:
                     score += 30
-            
-            # Notes aiguës (> C4) sur cordes 1-3
             else:
                 if pos['string'] <= 3:
                     score += 50
@@ -168,19 +145,9 @@ class TabGenerator:
     def find_best_chord_positions(self, chord_notes, max_fret=12, debug=False):
         """
         Find the best positions for all notes in a chord simultaneously
-        
-        Args:
-            chord_notes: List of MIDI note numbers in the chord
-            max_fret: Maximum fret to consider
-            debug: Print detailed scoring info
-            
-        Returns:
-            list: Best positions for each note
         """
-        # ÉTAPE 1: Trier les notes (grave → aigu)
         sorted_notes = sorted(chord_notes)
         
-        # ÉTAPE 2: Pour chaque note, trouver TOUTES les positions possibles
         all_possibilities = []
         for note in sorted_notes:
             positions = self.find_all_positions_for_note(note, max_fret)
@@ -188,11 +155,9 @@ class TabGenerator:
                 print(f"  ⚠️ Aucune position trouvée pour MIDI {note}")
                 return []
             
-            # TRI IMPORTANT: Positions par ordre de préférence
-            # Priorité: corde à vide > frette 1-3 > autres
             positions.sort(key=lambda p: (
-                -1 if p['fret'] == 0 else (0 if p['fret'] <= 3 else 1),  # Catégorie
-                p['fret']  # Puis par numéro de frette
+                -1 if p['fret'] == 0 else (0 if p['fret'] <= 3 else 1),
+                p['fret']
             ))
             
             all_possibilities.append(positions)
@@ -202,11 +167,8 @@ class TabGenerator:
                 for i, p in enumerate(positions[:3]):
                     print(f"    {i+1}. String {p['string']}, Fret {p['fret']}")
         
-        # ÉTAPE 3: Limiter les combinaisons pour éviter l'explosion
-        # Garder maximum 4 positions par note (priorisées ci-dessus)
         all_possibilities = [p[:4] for p in all_possibilities]
         
-        # ÉTAPE 4: Évaluer TOUTES les combinaisons
         from itertools import product
         
         best_score = -float('inf')
@@ -215,7 +177,7 @@ class TabGenerator:
         evaluated = 0
         for combination in product(*all_possibilities):
             combination_list = list(combination)
-            score = self.score_chord_shape(combination_list, sorted_notes)  # Passer les MIDI notes
+            score = self.score_chord_shape(combination_list, sorted_notes)
             
             evaluated += 1
             
@@ -235,63 +197,49 @@ class TabGenerator:
     def group_into_chords(self, midi_notes, chord_window=0.5):
         """
         Group MIDI notes into chords based on timing
-        
-        Args:
-            midi_notes: List of note dictionaries
-            chord_window: Time window to consider notes simultaneous (seconds)
-            
-        Returns:
-            list: List of chord groups
         """
         if not midi_notes:
             return []
         
-        # Sort by start time
         sorted_notes = sorted(midi_notes, key=lambda x: x['start_time'])
         
         chords = []
         current_chord = [sorted_notes[0]]
         
         for note in sorted_notes[1:]:
-            # Check if note starts within chord_window of first note
             if note['start_time'] - current_chord[0]['start_time'] <= chord_window:
                 current_chord.append(note)
             else:
                 chords.append(current_chord)
                 current_chord = [note]
         
-        # Add last chord
         if current_chord:
             chords.append(current_chord)
         
         return chords
     
-    def generate_tab_from_midi_notes(self, midi_notes, min_duration=0.1, chord_window=0.5, max_fret=12, max_gap=1.0):
+    def generate_tab_from_midi_notes(self, midi_notes, min_duration=0.1, chord_window=0.5, max_fret=12, max_gap=1.0, capo=0):
         """
-        Generate tablature from MIDI notes using chord-aware positioning
+        Generate tablature from MIDI notes using chord-aware positioning.
         
         Args:
             midi_notes: List of note dictionaries from AudioTranscriber
             min_duration: Minimum note duration to include (seconds)
             chord_window: Time window to group notes as chord (seconds)
             max_fret: Maximum fret to consider
-            max_gap: Maximum silence gap - stop after this (seconds). Set to None to process all.
+            max_gap: Maximum silence gap - stop after this (seconds)
+            capo: Capo fret position (0 = no capo). Frets in output are relative to capo.
             
         Returns:
-            list: Tablature data with positions
+            list: Tablature data with positions (frets relative to capo if capo > 0)
         """
-        # Filter short notes
         filtered_notes = [n for n in midi_notes if n['duration'] >= min_duration]
         
-        # Group into chords
         chords = self.group_into_chords(filtered_notes, chord_window)
         
         print(f"  📋 {len(chords)} accord(s) détecté(s) avant filtrage")
         
-        # NOUVEAU: Détecter les silences longs et couper après le premier accord principal
         if max_gap is not None and len(chords) > 1:
-            # Vérifier le gap temporel entre le DÉBUT du premier et deuxième accord
-            # (plus fiable que la fin de la dernière note qui peut résonner longtemps)
             gap = chords[1][0]['start_time'] - chords[0][0]['start_time']
             print(f"  ⏱️ Temps entre accord 1 et 2: {gap:.2f}s (seuil: {max_gap}s)")
             if gap > max_gap:
@@ -302,16 +250,18 @@ class TabGenerator:
         
         print(f"  📋 {len(chords)} accord(s) après filtrage")
         
+        if capo > 0:
+            print(f"  🎸 Capo détecté à la frette {capo} - frettes affichées relatives au capo")
+        
         tab_data = []
         
         for chord_idx, chord in enumerate(chords):
             print(f"\n🎵 Traitement accord #{chord_idx + 1}:")
             
-            # IMPORTANT: Supprimer les doublons (même note MIDI détectée plusieurs fois)
+            # Supprimer les doublons
             unique_notes = {}
             for note in chord:
                 midi_num = note['midi_note']
-                # Garder la note avec la plus haute vélocité (la plus forte)
                 if midi_num not in unique_notes or note['velocity'] > unique_notes[midi_num]['velocity']:
                     unique_notes[midi_num] = note
             
@@ -321,18 +271,23 @@ class TabGenerator:
                 print(f"  ⚠️ Doublons supprimés: {len(chord)} → {len(unique_chord)} notes uniques")
                 print(f"  Notes: {[n['note_name'] for n in unique_chord]}")
             
-            # Extract MIDI notes
             chord_midi_notes = [n['midi_note'] for n in unique_chord]
             
-            # Find best positions for this chord as a whole
             positions = self.find_best_chord_positions(chord_midi_notes, max_fret)
             
             if not positions:
                 print(f"  ❌ Impossible de trouver des positions pour cet accord")
                 continue
             
-            # Create tab data for each note with its position
             for note, pos in zip(unique_chord, positions):
+                # Frette relative au capo (0 = corde à vide au niveau du capo)
+                displayed_fret = pos['fret'] - capo
+                
+                # Sanity check: frette relative ne peut pas être négative
+                if displayed_fret < 0:
+                    print(f"  ⚠️ Frette négative ignorée (fret absolu {pos['fret']}, capo {capo})")
+                    continue
+                
                 tab_data.append({
                     'start_time': note['start_time'],
                     'end_time': note['end_time'],
@@ -341,34 +296,33 @@ class TabGenerator:
                     'frequency': note['frequency'],
                     'note_name': note['note_name'],
                     'string': pos['string'],
-                    'fret': pos['fret'],
+                    'fret': displayed_fret,          # Relatif au capo
+                    'fret_absolute': pos['fret'],     # Position réelle sur le manche
                     'velocity': note['velocity']
                 })
         
         return sorted(tab_data, key=lambda x: x['start_time'])
     
-    def format_tab_ascii(self, tab_data, duration=None, time_scale=1.0):
+    def format_tab_ascii(self, tab_data, capo=0):
         """
-        Format tab data as ASCII tablature
+        Format tab data as ASCII tablature.
+        If capo > 0, adds a capo indicator header above the tab.
+        Frets are assumed to already be relative to capo.
         
         Args:
             tab_data: List of note dictionaries
-            duration: Total duration (optional)
-            time_scale: Scale factor for horizontal spacing
+            capo: Capo fret (0 = no capo)
             
         Returns:
-            str: ASCII tablature
+            str: ASCII tablature with optional capo header
         """
         if not tab_data:
             return "No notes detected"
 
-        # Initialize lines
         lines = {1: 'e|', 2: 'B|', 3: 'G|', 4: 'D|', 5: 'A|', 6: 'E|'}
         
-        # Sort by time
         sorted_data = sorted(tab_data, key=lambda x: x.get('start_time', x.get('time', 0)))
         
-        # Build tablature
         for note in sorted_data:
             string_num = note['string']
             fret = note['fret']
@@ -382,11 +336,18 @@ class TabGenerator:
                 else:
                     lines[s] += '-' * (max_width + 1)
         
-        # Add ending
         for s in range(1, 7):
             lines[s] += '|'
         
-        return '\n'.join([lines[1], lines[2], lines[3], lines[4], lines[5], lines[6]])
+        tab_str = '\n'.join([lines[1], lines[2], lines[3], lines[4], lines[5], lines[6]])
+        
+        # Ajouter l'indicateur de capo en haut si nécessaire
+        if capo > 0:
+            ordinals = {1: '1st', 2: '2nd', 3: '3rd', 4: '4th', 5: '5th', 6: '6th', 7: '7th'}
+            capo_header = f"[Capo {ordinals.get(capo, str(capo)+'th')} fret]\n"
+            tab_str = capo_header + tab_str
+        
+        return tab_str
 
 
 def test_tab_generator_with_midi():
@@ -404,23 +365,21 @@ def test_tab_generator_with_midi():
     print("=" * 60)
     print()
     
-    # Transcribe audio
     audio_file = "tests/315706__spitefuloctopus__acousticguitar-c-chord.wav"
     result = transcriber.transcribe_audio(audio_file)
     
-    # Generate tabs with chord awareness
     tab_data = generator.generate_tab_from_midi_notes(
         result['notes'], 
         min_duration=0.1,
         chord_window=0.6,
-        max_fret=12,  # Only consider first 12 frets for open chords
-        max_gap=1.0   # Stop after 1 second silence (keep only first chord)
+        max_fret=12,
+        max_gap=1.0,
+        capo=0  # Pas de capo pour ce test
     )
     
     print(f"📊 Generated {len(tab_data)} tab positions")
     print()
     
-    # Show detected positions
     print("Detected Tab Positions:")
     print("-" * 60)
     for i, note in enumerate(tab_data[:10]):
@@ -432,36 +391,11 @@ def test_tab_generator_with_midi():
     print()
     print("Generated ASCII Tablature:")
     print("-" * 60)
-    print(generator.format_tab_ascii(tab_data))
+    print(generator.format_tab_ascii(tab_data, capo=0))
     print()
     
-    # Show chord analysis
     chords = generator.group_into_chords(result['notes'], chord_window=0.6)
     print(f"🎵 Detected {len(chords)} chord group(s)")
-    
-    if chords:
-        print("\nFirst Chord Analysis:")
-        print("-" * 60)
-        
-        # Supprimer les doublons pour l'analyse aussi
-        first_chord = chords[0]
-        unique_notes_dict = {}
-        for note in first_chord:
-            midi_num = note['midi_note']
-            if midi_num not in unique_notes_dict or note['velocity'] > unique_notes_dict[midi_num]['velocity']:
-                unique_notes_dict[midi_num] = note
-        
-        unique_first_chord = list(unique_notes_dict.values())
-        chord_notes = [n['note_name'] for n in unique_first_chord]
-        print(f"Notes (uniques): {', '.join(chord_notes)}")
-        
-        # Find positions for first chord
-        first_chord_midi = [n['midi_note'] for n in unique_first_chord]
-        positions = generator.find_best_chord_positions(first_chord_midi, max_fret=12)
-        
-        print("\nChosen positions:")
-        for i, pos in enumerate(positions):
-            print(f"  {chord_notes[i]:4s} (MIDI {first_chord_midi[i]:2d}) → String {pos['string']}, Fret {pos['fret']}")
     
     print()
     print("=" * 60)
